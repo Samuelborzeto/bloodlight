@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -19,7 +22,11 @@ jobs:
           gradle-version: 8.9
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bloodlight-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publish APK in the latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Bloodlight.apk
+          gh release delete latest --cleanup-tag -y -R "${{ github.repository }}" || true
+          gh release create latest Bloodlight.apk -R "${{ github.repository }}" \
+            --title "Bloodlight (último build)" --notes "APK mais recente, gerado a cada envio para a main."
