@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Bloodlight</string>
+    <string name="grant_overlay">Permitir escurecer a tela</string>
+    <string name="tile_label">Bloodlight</string>
+    <string name="notif_channel">Bloodlight</string>
+    <string name="notif_title">Bloodlight ativo</string>
+    <string name="notif_text">Toque para ajustar o escurecimento</string>
+    <string name="notif_off">Desligar</string>
+    <string name="bar_desc">Controle de brilho: arraste o vampiro para os lados</string>
+</resources>
