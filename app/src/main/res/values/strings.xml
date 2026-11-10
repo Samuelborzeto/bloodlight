@@ -2,10 +2,15 @@
 <resources>
     <string name="app_name">Bloodlight</string>
     <string name="grant_overlay">Permitir escurecer a tela</string>
+    <string name="strong_button">Escurecer mais (ativar acessibilidade)</string>
+    <string name="strong_hint">Se o Android disser que é uma configuração restrita: Informações do app › ⋮ › Permitir configurações restritas, e tente de novo.</string>
+    <string name="app_info">Abrir informações do app</string>
     <string name="tile_label">Bloodlight</string>
     <string name="notif_channel">Bloodlight</string>
     <string name="notif_title">Bloodlight ativo</string>
     <string name="notif_text">Toque para ajustar o escurecimento</string>
     <string name="notif_off">Desligar</string>
     <string name="bar_desc">Controle de brilho: arraste o vampiro para os lados</string>
+    <string name="acc_label">Bloodlight (escurecimento forte)</string>
+    <string name="acc_desc">Deixa o Bloodlight escurecer a tela quase até o preto. O app não lê nada do que aparece na tela.</string>
 </resources>
