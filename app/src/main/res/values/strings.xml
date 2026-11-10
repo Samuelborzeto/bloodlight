@@ -5,6 +5,7 @@
     <string name="strong_button">Escurecer mais (ativar acessibilidade)</string>
     <string name="strong_hint">Se o Android disser que é uma configuração restrita: Informações do app › ⋮ › Permitir configurações restritas, e tente de novo.</string>
     <string name="app_info">Abrir informações do app</string>
+    <string name="turn_off">Desligar</string>
     <string name="tile_label">Bloodlight</string>
     <string name="notif_channel">Bloodlight</string>
     <string name="notif_title">Bloodlight ativo</string>

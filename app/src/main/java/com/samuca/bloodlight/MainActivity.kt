@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var strongButton: Button
     private lateinit var strongHint: TextView
     private lateinit var infoButton: Button
+    private lateinit var offButton: Button
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,6 +98,24 @@ class MainActivity : Activity() {
         val side = (24 * density).toInt()
         clp.setMargins(side, 0, side, (48 * density).toInt())
         root.addView(column, clp)
+
+        offButton = Button(this).apply {
+            text = getString(R.string.turn_off)
+            styled(this)
+            setOnClickListener {
+                Prefs.setEnabled(this@MainActivity, false)
+                Dimmer.apply(this@MainActivity, bar.level)
+                DimService.stop(this@MainActivity)
+                finish()
+            }
+        }
+        val olp = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            (40 * density).toInt(),
+            Gravity.TOP or Gravity.END
+        )
+        olp.setMargins(0, (40 * density).toInt(), (20 * density).toInt(), 0)
+        root.addView(offButton, olp)
 
         setContentView(root)
     }
