@@ -49,10 +49,17 @@ class DimOverlay(private val ctx: Context, private val type: Int, private val st
     private var view: View? = null
 
     fun show(level: Float) {
-        val v = view ?: add() ?: return
         val minLum = if (strong) Dimmer.MIN_LUMINANCE_STRONG else Dimmer.MIN_LUMINANCE_BASIC
         val windowOpacity = if (strong) 1f else Dimmer.BASIC_WINDOW_OPACITY
         val alpha = (Dimmer.dimFor(level, minLum) / windowOpacity * 255f).roundToInt().coerceIn(0, 255)
+        if (alpha == 0) {
+            // Sem escurecimento não deixa janela nenhuma na tela. Uma camada comum, mesmo
+            // transparente, faz o Android recusar toques em telas protegidas (troca de conta,
+            // permissões, senhas).
+            hide()
+            return
+        }
+        val v = view ?: add() ?: return
         v.setBackgroundColor(Color.argb(alpha, 0, 0, 0))
     }
 

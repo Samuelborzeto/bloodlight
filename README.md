@@ -13,7 +13,7 @@ https://github.com/Samuelborzeto/bloodlight/releases/download/latest/Bloodlight.
 
 ## Primeiro uso
 - O botão "Permitir escurecer a tela" abre a permissão "Exibir sobre outros apps". Ativar para o Bloodlight.
-- Para escurecer quase até o preto: botão "Escurecer mais" > ativar "Bloodlight (escurecimento forte)" em Acessibilidade. Sem isso, o limite é 79% de escurecimento.
+- Modo completo: botão "Ativar modo completo" > ligar "Bloodlight (modo completo)" em Acessibilidade. Escurece quase até o preto e não bloqueia o toque em telas protegidas (troca de conta, permissões, senhas). Sem ele, o limite é 79% e essas telas não respondem enquanto a tela está escurecida.
 - Se o Android disser que é uma configuração restrita: Informações do app > ⋮ > Permitir configurações restritas.
 - Tocar fora da barra fecha o app (o escurecimento continua).
 - Para ligar/desligar rápido: adicionar o bloco "Bloodlight" no painel de configurações rápidas.
