@@ -20,6 +20,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -123,6 +124,38 @@ class BloodBarView(context: Context) : View(context) {
         shader = RadialGradient(0f, 0f, 1f, intArrayOf(0xFF1A0505.toInt(), 0x001A0505), null, Shader.TileMode.CLAMP)
         xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
     }
+    private val bandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = LinearGradient(
+            -1f, 0f, 1f, 0f,
+            intArrayOf(0x00FFFFFF, 0xFFFFFFFF.toInt(), 0x00FFFFFF), null, Shader.TileMode.CLAMP
+        )
+    }
+    private val mistPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(0f, 0f, 1f, intArrayOf(0xFF3A0508.toInt(), 0x003A0508), null, Shader.TileMode.CLAMP)
+    }
+    private val shadowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(0f, 0f, 1f, intArrayOf(0xFF000000.toInt(), 0x00000000), null, Shader.TileMode.CLAMP)
+    }
+    private val gemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(0f, 0f, 1f, intArrayOf(0xFFFF3020.toInt(), 0x00FF1010), null, Shader.TileMode.CLAMP)
+    }
+
+    // malha que deforma a cabeça: a gola fica presa na barra, rosto e cabelo se mexem
+    private val meshVerts = FloatArray((MESH + 1) * (MESH + 1) * 2)
+    private var poseCos = 1f
+    private var poseSin = 0f
+    private var poseTx = 0f
+    private var poseTy = 0f
+    private var poseScale = 1f
+    private var hairAmp = 0f
+    private var hairPush = 0f
+    private var wxOut = 0f
+    private var wyOut = 0f
+
+    private var beatPhase = 0f
+    private var beat = 0f
+    private var fangTimer = 3f
+
     private val batFill = Paint(Paint.ANTI_ALIAS_FLAG)
     private val batStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -261,11 +294,14 @@ class BloodBarView(context: Context) : View(context) {
         val mx = markerX()
         val burn = burnAmount()
 
+        drawMist(canvas)
+        drawAura(canvas, mx, burn)
         drawTube(canvas, mx)
         drawRails(canvas)
         drawDrips(canvas)
         drawCaps(canvas)
         drawGlow(canvas, mx, burn)
+        drawHeadShadow(canvas, mx)
         drawHead(canvas, mx, burn)
         drawParticles(canvas)
 
@@ -305,6 +341,29 @@ class BloodBarView(context: Context) : View(context) {
                 canvas.drawPath(tmpPath, linePaint)
             }
 
+            // manchas escuras que correm devagar em direção ao vampiro
+            fillPaint.shader = null
+            for (i in 0..4) {
+                val u = (i * 0.23f + flow * 0.03f * (1f + i * 0.2f)) % 1f
+                val bx = tubeL + u * (mx - tubeL)
+                val by = cy + sin(i * 2.1f + flow * 0.5f) * tubeHalf * 0.5f
+                fillPaint.color = 0x48300004
+                rect.set(bx - 42f * s, by - 13f * s, bx + 42f * s, by + 13f * s)
+                canvas.drawOval(rect, fillPaint)
+            }
+
+            // pulso: uma onda clara atravessa o sangue a cada batida
+            if (!reduceMotion) {
+                val ph = beatPhase % 1f
+                val px = tubeL + ph * (mx - tubeL)
+                bandPaint.alpha = (70f * (1f - ph)).toInt()
+                canvas.save()
+                canvas.translate(px, 0f)
+                canvas.scale(70f * s, 1f)
+                canvas.drawRect(-1f, top, 1f, bottom, bandPaint)
+                canvas.restore()
+            }
+
             // bolhas
             linePaint.strokeWidth = 1f * dp
             for (b in bubbles) {
@@ -320,6 +379,85 @@ class BloodBarView(context: Context) : View(context) {
             canvas.drawRect(tubeL, top, mx, top + 22f * s, fillPaint)
         }
         fillPaint.shader = null
+
+        // marcas gravadas na parte vazia
+        linePaint.shader = null
+        linePaint.strokeWidth = 2.5f * s
+        for (k in 1..9) {
+            val tx = tubeL + k / 10f * (tubeR - tubeL)
+            if (tx < mx + shieldHalf * 0.5f) continue
+            val a = if (reduceMotion) 110 else (95 + 60 * sin(time * 1.5f + k)).toInt()
+            linePaint.color = Color.argb(a, 150, 24, 34)
+            val hh = if (k == 5) 16f * s else 9f * s
+            canvas.drawLine(tx, cy - hh, tx, cy + hh, linePaint)
+        }
+
+        // vidro: brilho fino em cima e um reflexo que passeia
+        linePaint.color = 0x30FFFFFF
+        linePaint.strokeWidth = 3f * s
+        canvas.drawLine(tubeL + tubeHalf * 0.8f, top + 10f * s, tubeR - tubeHalf * 0.8f, top + 10f * s, linePaint)
+        if (!reduceMotion) {
+            val gx = lerp(tubeL + tubeHalf, tubeR - tubeHalf, 0.5f + 0.5f * sin(time * 0.25f))
+            fillPaint.color = 0x38FFFFFF
+            rect.set(gx - 46f * s, top + 14f * s, gx + 46f * s, top + 24f * s)
+            canvas.drawOval(rect, fillPaint)
+        }
+        canvas.restore()
+    }
+
+    private fun drawMist(canvas: Canvas) {
+        for (i in 0..5) {
+            val u = if (reduceMotion) (i + 0.5f) / 6f else (i * 0.19f + time * 0.012f * (1 + i % 3)) % 1f
+            val x = tubeL + u * (tubeR - tubeL)
+            val y = cy + sin(time * 0.3f + i * 1.9f) * tubeHalf * 1.6f
+            val edge = sin(PI.toFloat() * u)
+            mistPaint.alpha = (70f * edge).toInt()
+            drawUnit(canvas, mistPaint, x, y, (150f + 40f * (i % 3)) * s)
+        }
+    }
+
+    /** Raios de luz atrás do vampiro no lado claro; sombra viva atrás dele no lado escuro. */
+    private fun drawAura(canvas: Canvas, mx: Float, burn: Float) {
+        val hy = cy - 45f * hs
+        if (burn > 0.05f) {
+            fillPaint.shader = null
+            val r = shieldHalf * 2.7f
+            for (i in 0 until 10) {
+                val flick = if (reduceMotion) 0.8f else 0.6f + 0.4f * sin(time * 3f + i * 1.3f)
+                fillPaint.color = Color.argb((burn * 46f * flick).toInt(), 255, 200, 120)
+                val a = (i * 36f + (if (reduceMotion) 0f else time * 12f)) * PI.toFloat() / 180f
+                val h = 0.085f
+                tmpPath.rewind()
+                tmpPath.moveTo(mx, hy)
+                tmpPath.lineTo(mx + cos(a - h) * r, hy + sin(a - h) * r)
+                tmpPath.lineTo(mx + cos(a + h) * r, hy + sin(a + h) * r)
+                tmpPath.close()
+                canvas.drawPath(tmpPath, fillPaint)
+            }
+        }
+        val dark = smooth((1f - level - 0.55f) / 0.45f)
+        if (dark > 0.02f) {
+            val pulse = if (reduceMotion) 1f else 0.9f + 0.1f * sin(time * 1.4f)
+            shadowPaint.alpha = (dark * 150f).toInt()
+            drawUnit(canvas, shadowPaint, mx, hy, shieldHalf * 2f * pulse)
+            linePaint.shader = null
+            linePaint.strokeWidth = 3f * dp
+            for (i in 0 until 5) {
+                val rr = shieldHalf * (1.2f + 0.1f * sin(time * 1.1f + i * 2f))
+                val start = (if (reduceMotion) 0f else time * 46f * (if (i % 2 == 0) 1f else -0.7f)) + i * 72f
+                linePaint.color = Color.argb((dark * 170f).toInt(), 60, 8, 38)
+                rect.set(mx - rr, hy - rr, mx + rr, hy + rr)
+                canvas.drawArc(rect, start, 38f, false, linePaint)
+            }
+        }
+    }
+
+    private fun drawHeadShadow(canvas: Canvas, mx: Float) {
+        shadowPaint.alpha = 120
+        canvas.save()
+        canvas.translate(mx + 6f * s, cy + 12f * s)
+        canvas.scale(shieldHalf * 1.05f, tubeHalf * 1.7f)
+        canvas.drawCircle(0f, 0f, 1f, shadowPaint)
         canvas.restore()
     }
 
@@ -345,16 +483,29 @@ class BloodBarView(context: Context) : View(context) {
         linePaint.color = 0x55FFFFFF
         canvas.drawLine(left + 8f * s, top - 15f * s, right - 8f * s, top - 15f * s, linePaint)
         canvas.drawLine(left + 8f * s, bottom + 2f * s, right - 8f * s, bottom + 2f * s, linePaint)
+
+        // rebites
+        for (k in 0 until 12) {
+            val rx = left + (k + 0.5f) / 12f * (right - left)
+            for (ry in floatArrayOf(top - 8f * s, bottom + 7f * s)) {
+                fillPaint.color = 0xFF3A3537.toInt()
+                canvas.drawCircle(rx, ry, 4.2f * s, fillPaint)
+                fillPaint.color = 0xFFA9A4A5.toInt()
+                canvas.drawCircle(rx - 0.8f * s, ry - 0.8f * s, 2.6f * s, fillPaint)
+            }
+        }
     }
 
     /** Reflexo que corre pelo metal (desenhado no retângulo atual em [rect]). */
     private fun drawShine(canvas: Canvas, left: Float, right: Float) {
-        val sx = lerp(left - 150f * s, right + 150f * s, smooth(shineT))
-        shinePaint.shader = LinearGradient(
-            sx - 90f * s, 0f, sx + 90f * s, 0f,
-            intArrayOf(0x00FFFFFF, 0xB0FFFFFF.toInt(), 0x00FFFFFF), null, Shader.TileMode.CLAMP
-        )
-        canvas.drawRoundRect(rect, 6f * s, 6f * s, shinePaint)
+        val sx = lerp(left, right, smooth(shineT))
+        bandPaint.alpha = 176
+        canvas.save()
+        canvas.clipRect(rect)
+        canvas.translate(sx, 0f)
+        canvas.scale(90f * s, 1f)
+        canvas.drawRect(-1f, rect.top, 1f, rect.bottom, bandPaint)
+        canvas.restore()
     }
 
     private fun dripScale(): Float = (s / 0.8f).coerceIn(0.7f, 1.3f)
@@ -387,6 +538,11 @@ class BloodBarView(context: Context) : View(context) {
         val rl = barRight - capR.width * s
         rect.set(rl, top, barRight, top + capR.height * s)
         canvas.drawBitmap(capR, null, rect, bmpPaint)
+
+        gemPaint.alpha = (60f + 150f * beat).toInt().coerceIn(0, 255)
+        val gr = (34f + 22f * beat) * s
+        drawUnit(canvas, gemPaint, barLeft + capLGemX * s, top + capGemY * s, gr)
+        drawUnit(canvas, gemPaint, rl + capRGemX * s, top + capGemY * s, gr)
 
         if (glintT >= 0f) {
             if (glintWhich == 0) drawGlint(canvas, barLeft + capLGemX * s, top + capGemY * s, 38f * s)
@@ -431,71 +587,122 @@ class BloodBarView(context: Context) : View(context) {
         drawUnit(canvas, glowPaint, mx, cy, shieldHalf * 1.7f)
     }
 
+    /** Desloca um ponto do desenho conforme a pose atual. Resultado em wxOut/wyOut. */
+    private fun warp(x: Float, y: Float) {
+        val wy = smooth((225f - y) / 70f)
+        val lat = 1f - smooth((abs(x - 190f) - 78f) / 40f)
+        val wx = lerp(1f, lat, smooth((y - 80f) / 22f))
+        val w = wy * wx
+        val px = x - 195f
+        val py = y - 215f
+        val rx = px * poseCos - py * poseSin
+        val ry = px * poseSin + py * poseCos
+        var nx = x + w * ((rx * poseScale - px) + poseTx)
+        var ny = y + w * ((ry * poseScale - py) + poseTy)
+        val hw = smooth((125f - y) / 95f) * wx
+        if (hw > 0f) {
+            nx += hw * (hairAmp * sin(time * 2.3f + x * 0.021f + y * 0.03f) + hairPush)
+            ny += hw * hairAmp * 0.35f * sin(time * 3.1f + x * 0.035f)
+        }
+        wxOut = nx
+        wyOut = ny
+    }
+
     private fun drawHead(canvas: Canvas, mx: Float, burn: Float) {
         val p = 1f - level
         val t = (p * 2f).coerceIn(0f, 1.999f)
         val idx = t.toInt()
         val frac = smooth((t - idx - 0.2f) / 0.6f)
 
-        var scale = hs * (1f + 0.07f * sin(kick * PI.toFloat()))
-        var rot = lean
+        val scale = hs * (1f + 0.07f * sin(kick * PI.toFloat()))
         var offX = 0f
-        var offY = 0f
+        var rot = 0f
+        poseTx = 0f
+        poseTy = 0f
+        poseScale = 1f
+        hairAmp = 0f
+        hairPush = 0f
         if (!reduceMotion) {
-            // respiração: mais calma quando protegido
+            rot = lean * 0.65f
             val breathSpeed = lerp(1.4f, 2.6f, level)
-            scale *= 1f + 0.012f * sin(time * breathSpeed)
-            offY = sin(time * 1.6f) * 1.5f * dp
-            if (gulpT >= 0f) scale *= 1f + 0.04f * sin(gulpT * 6f * PI.toFloat()) * (1f - gulpT)
-            if (burn > 0.3f) offX = sin(time * 38f) * 1.1f * dp * burn
-            if (shakeT > 0f) offX += sin(time * 70f) * 4f * dp * (shakeT / 0.7f)
-            if (extreme == 1) offX += sin(time * 60f) * 3f * dp * kick
+            poseScale = 1f + 0.014f * sin(time * breathSpeed) + 0.008f * beat
+            poseTy = sin(time * 1.6f) * 2f
+            if (gulpT >= 0f) poseTy -= 4f * sin(gulpT * 6f * PI.toFloat()) * (1f - gulpT)
+            if (burn > 0.3f) poseTx += sin(time * 38f) * 1.4f * burn
+            if (shakeT > 0f) poseTx += sin(time * 70f) * 5f * (shakeT / 0.7f)
+            if (extreme == 1) offX = sin(time * 60f) * 3f * dp * kick
             if (idleType == IDLE_TILT) {
                 val u = idleT / idleDur
-                rot += sin(u * 2f * PI.toFloat()) * 8f * sin(u * PI.toFloat())
+                rot += sin(u * 2f * PI.toFloat()) * 6f * sin(u * PI.toFloat())
             }
             if (idleType == IDLE_LOOK) {
                 val u = idleT / idleDur
-                offX += sin(u * 2f * PI.toFloat()) * 8f * dp * sin(u * PI.toFloat())
+                poseTx += sin(u * 2f * PI.toFloat()) * 9f * sin(u * PI.toFloat())
+            }
+            hairAmp = 3f + 3f * burn
+            hairPush = -lean * 1.4f
+        }
+        val rad = rot.coerceIn(-8f, 8f) * PI.toFloat() / 180f
+        poseCos = cos(rad)
+        poseSin = sin(rad)
+
+        var k = 0
+        for (j in 0..MESH) {
+            for (i in 0..MESH) {
+                warp(i * headW / MESH, j * headH / MESH)
+                meshVerts[k++] = wxOut
+                meshVerts[k++] = wyOut
             }
         }
 
         canvas.save()
-        canvas.translate(mx + offX, cy + offY)
-        canvas.rotate(rot)
+        canvas.translate(mx + offX, cy)
         canvas.scale(scale, scale)
         canvas.translate(-headAnchorX, -headAnchorY)
 
         val blinking = blinkT >= 0f
         val set = if (blinking) blinks else heads
 
-        val layer = canvas.saveLayer(0f, 0f, headW, headH, null)
+        val layer = canvas.saveLayer(-40f, -40f, headW + 40f, headH + 40f, null)
         bmpPaint.alpha = 255
-        canvas.drawBitmap(set[idx], 0f, 0f, bmpPaint)
+        canvas.drawBitmapMesh(set[idx], MESH, MESH, meshVerts, 0, null, 0, bmpPaint)
         if (frac > 0.01f) {
             bmpPaint.alpha = (frac * 255f).toInt()
-            canvas.drawBitmap(set[idx + 1], 0f, 0f, bmpPaint)
+            canvas.drawBitmapMesh(set[idx + 1], MESH, MESH, meshVerts, 0, null, 0, bmpPaint)
             bmpPaint.alpha = 255
         }
         if (burn > 0.03f) {
             val a = (burn * 0.75f * 255f).toInt().coerceIn(0, 255)
             burnPaint.alpha = a
-            drawUnit(canvas, burnPaint, 150f, 152f, 44f)
-            drawUnit(canvas, burnPaint, 256f, 156f, 40f)
-            drawUnit(canvas, burnPaint, 205f, 84f, 56f)
+            warp(150f, 152f); drawUnit(canvas, burnPaint, wxOut, wyOut, 44f)
+            warp(256f, 156f); drawUnit(canvas, burnPaint, wxOut, wyOut, 40f)
+            warp(205f, 84f); drawUnit(canvas, burnPaint, wxOut, wyOut, 56f)
             burnPaint.alpha = (a * 0.7f).toInt()
-            drawUnit(canvas, burnPaint, 196f, 210f, 36f)
+            warp(196f, 210f); drawUnit(canvas, burnPaint, wxOut, wyOut, 36f)
         }
         canvas.restoreToCount(layer)
 
-        // olhos acesos quando exposto à luz
+        // pedra da gola pulsa com a batida
+        gemPaint.alpha = (50f + 150f * beat).toInt().coerceIn(0, 255)
+        drawUnit(canvas, gemPaint, headGemX, headGemY, 30f + 20f * beat)
+
+        // olhos acesos quando exposto à luz, com rastro ao arrastar rápido
         if (!blinking) {
             val pulse = if (reduceMotion) 1f else 0.7f + 0.3f * sin(time * 6.5f)
             val eg = smooth((level - 0.4f) / 0.6f) * pulse
             if (eg > 0.02f) {
-                eyeGlowPaint.alpha = (eg * 200f).toInt().coerceIn(0, 255)
-                drawUnit(canvas, eyeGlowPaint, eyes[0], eyes[1], 22f)
-                drawUnit(canvas, eyeGlowPaint, eyes[2], eyes[3], 22f)
+                val trail = (-vel / (900f * dp)).coerceIn(-1f, 1f) * 46f
+                for (e in 0..1) {
+                    warp(eyes[e * 2], eyes[e * 2 + 1])
+                    if (abs(trail) > 4f) {
+                        linePaint.shader = null
+                        linePaint.strokeWidth = 7f
+                        linePaint.color = Color.argb((eg * 110f).toInt(), 255, 40, 20)
+                        canvas.drawLine(wxOut, wyOut, wxOut + trail, wyOut - abs(trail) * 0.12f, linePaint)
+                    }
+                    eyeGlowPaint.alpha = (eg * 200f).toInt().coerceIn(0, 255)
+                    drawUnit(canvas, eyeGlowPaint, wxOut, wyOut, 22f)
+                }
             }
         }
         if (glintT >= 0f && glintWhich == 2) drawGlint(canvas, headGemX, headGemY, 36f)
@@ -553,6 +760,16 @@ class BloodBarView(context: Context) : View(context) {
                     canvas.drawCircle(pt.x, pt.y, pt.size * (1f - a * 0.5f), fillPaint)
                 }
                 BAT -> drawBat(canvas, pt, a)
+                SPARK -> {
+                    linePaint.color = Color.argb((255 * (1f - a)).toInt(), 255, (230 - 120 * a).toInt(), 140)
+                    linePaint.strokeWidth = pt.size
+                    canvas.drawLine(pt.x, pt.y, pt.x - pt.vx * 0.035f, pt.y - pt.vy * 0.035f, linePaint)
+                }
+                FANG -> {
+                    fillPaint.color = Color.argb((255 * (1f - a * a)).toInt(), 200, 10, 14)
+                    rect.set(pt.x - pt.size, pt.y - pt.size * 1.7f, pt.x + pt.size, pt.y + pt.size)
+                    canvas.drawOval(rect, fillPaint)
+                }
             }
         }
     }
@@ -681,6 +898,26 @@ class BloodBarView(context: Context) : View(context) {
             if (gulpT > 1f) gulpT = -1f
         }
 
+        // batida do coração: mais rápida quanto mais luz
+        beatPhase += dt * lerp(0.75f, 1.9f, level)
+        val ph = beatPhase % 1f
+        beat = max(max(0f, 1f - ph / 0.15f), 0.6f * max(0f, 1f - abs(ph - 0.3f) / 0.12f))
+
+        // gota de sangue escorrendo da presa quando ele está alimentado
+        if (level < 0.35f) {
+            fangTimer -= dt
+            if (fangTimer <= 0f) {
+                fangTimer = rnd(2.2f, 5.5f)
+                val side = if (Random.nextBoolean()) -11f else 11f
+                addParticle(
+                    P(
+                        mx + (mouthX + side - headAnchorX) * hs, cy + (mouthY + 8f - headAnchorY) * hs,
+                        0f, 0f, 0.55f, 2.3f * dp, FANG, 0f
+                    )
+                )
+            }
+        }
+
         val burn = burnAmount()
         if (burn > 0.02f) {
             fireAcc += dt * 34f * burn
@@ -739,8 +976,17 @@ class BloodBarView(context: Context) : View(context) {
                     pt.x += (pt.vx + sin(time * 2f + pt.phase) * 10f * dp) * dt
                     pt.y += pt.vy * dt
                 }
-                DROP -> {
+                DROP, FANG -> {
                     pt.vy += 1600f * dp * dt
+                    pt.y += pt.vy * dt
+                }
+                SPARK -> {
+                    pt.vy += 900f * dp * dt
+                    pt.x += pt.vx * dt
+                    pt.y += pt.vy * dt
+                }
+                SMOKE -> {
+                    pt.x += (pt.vx + sin(pt.age * 5f + pt.phase) * 26f * dp) * dt
                     pt.y += pt.vy * dt
                 }
                 BAT -> {
@@ -770,7 +1016,7 @@ class BloodBarView(context: Context) : View(context) {
     }
 
     private fun addParticle(p: P) {
-        if (particles.size < 180) particles.add(p)
+        if (particles.size < 240) particles.add(p)
     }
 
     private fun spawnFire(mx: Float, burn: Float, burst: Boolean) {
@@ -785,7 +1031,7 @@ class BloodBarView(context: Context) : View(context) {
                 -(40f + Random.nextFloat() * 50f) * dp * speed,
                 rnd(0.7f, 1.4f),
                 (3f + Random.nextFloat() * 4f) * dp * (0.5f + burn * 0.8f) * (if (burst) 1.3f else 1f),
-                if (smoke) SMOKE else FIRE, 0f
+                if (smoke) SMOKE else FIRE, rnd(0f, 6.28f)
             )
         )
     }
@@ -798,6 +1044,18 @@ class BloodBarView(context: Context) : View(context) {
                     mx + rnd(-30f, 30f) * dp, cy - 60f * hs,
                     rnd(-280f, 280f) * dp, -rnd(110f, 250f) * dp,
                     rnd(1.8f, 2.7f), rnd(13f, 22f) * dp, BAT, rnd(0f, 6.28f)
+                )
+            )
+        }
+    }
+
+    private fun spawnSparks(x: Float, dir: Float) {
+        for (i in 0 until 16) {
+            addParticle(
+                P(
+                    x, cy + rnd(-0.6f, 0.6f) * tubeHalf,
+                    dir * rnd(120f, 420f) * dp, -rnd(60f, 380f) * dp,
+                    rnd(0.35f, 0.7f), rnd(1.2f, 2.2f) * dp, SPARK, 0f
                 )
             )
         }
@@ -863,7 +1121,9 @@ class BloodBarView(context: Context) : View(context) {
                 if (e == -1) {
                     spawnBats(4 + Random.nextInt(3))
                     gulpT = 0f
+                    spawnSparks(tubeL + tubeHalf, 1f)
                 } else {
+                    spawnSparks(tubeR - tubeHalf, -1f)
                     shakeT = 0.7f
                     repeat(22) { spawnFire(markerX(), 1f, true) }
                 }
@@ -925,6 +1185,9 @@ class BloodBarView(context: Context) : View(context) {
         private const val SIP = 5
         private const val BAT = 6
         private const val BUBBLE = 7
+        private const val SPARK = 8
+        private const val FANG = 9
+        private const val MESH = 10
 
         private const val IDLE_TILT = 0
         private const val IDLE_LOOK = 1
